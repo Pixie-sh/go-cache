@@ -1,4 +1,4 @@
-# pcache - Pixie Cache
+# pcache - PixieCache
 
 A high-performance, concurrent, and generic caching solution for Go applications.
 
@@ -9,84 +9,38 @@ It's designed to be used in high-concurrency environments and leverages Go's typ
 
 ## Architecture
 
+Below is the updated Mermaid diagram representing the core components and their relationships:
+
 ```mermaid
-classDiagram
-    class Driver~T~ {
-        <<interface>>
-        +Set(ctx, key, value, expiration) error
-        +Get(ctx, key) (T, bool, error)
-        +Delete(ctx, key) error
-        +GetExpiration(ctx, key) (time.Time, bool, error)
-        +Keys(ctx) ([]string, error)
-    }
+sequenceDiagram
+    participant Client
+    participant Service
+    participant Driver
 
-    class CacheService~T~ {
-        -provider Driver~T~
-        -getChannel chan CacheRequest~T~
-        -saveChannel chan CacheSaveRequest~T~
-        -updateFunc UpdateFunc~T~
-        -cleanupTicker *time.Ticker
-        -wg sync.WaitGroup
-        -quit chan struct{}
-        +GetChannel() chan<- CacheRequest~T~
-        +SaveChannel() chan<- CacheSaveRequest~T~
-        -worker()
-        -cleanupWorker()
-        -checkExpiredEntries()
-        +StartAsync(ctx)
-        +Close()
-    }
+%% Set Operation
+    Client->>Service: Set(ctx, key, value, expiration)
+    Service->>Service: Create SetRequest with response channel
+    Service->>Service: Send request to saveChannel
+    Service->>Service: handleSet() processes request
+    Service->>Driver: provider.Set(ctx, key, value, expiration)
+    Driver-->>Service: Return error (if any)
+    Service-->>Client: Return key, value, expiration, error
 
-    class MemoryCache~T~ {
-        -data map[string]MemoryCacheEntry~T~
-        -mutex sync.RWMutex
-        +Set(ctx, key, value, expiration) error
-        +Get(ctx, key) (T, bool, error)
-        +Delete(ctx, key) error
-        +GetExpiration(ctx, key) (time.Time, bool, error)
-        +Keys(ctx) ([]string, error)
-    }
+%% Get Operation
+    Client->>Service: Get(key)
+    Service->>Service: Create Request with response channel
+    Service->>Service: Send request to getChannel
+    Service->>Service: handleGet() processes request
+    Service->>Driver: provider.Get(ctx, key)
+    Driver-->>Service: Return value, exists, error
 
-    class MemoryCacheEntry~T~ {
-        +Value T
-        +Expiration time.Time
-    }
+    alt Cache miss or error (if configured)
+        Service->>Service: Call updateFunc(key)
+        Service->>Driver: provider.Set(ctx, key, newValue, duration)
+    end
 
-    class CacheRequest~T~ {
-        +Key string
-        +Response chan CacheResponse~T~
-    }
+    Service-->>Client: Return value, cacheMiss, error
 
-    class CacheResponse~T~ {
-        +Value T
-        +Found bool
-        +Error error
-    }
-
-    class CacheSaveRequest~T~ {
-        +Key string
-        +Value T
-        +Expiration time.Duration
-    }
-
-    %% Type definitions
-    class UpdateFunc~T~ {
-        <<typedef>>
-        function(key string) (T, time.Duration, error)
-    }
-
-    %% Relationships
-    Driver <|.. MemoryCache : implements
-    CacheService o-- Driver : uses
-    MemoryCache *-- MemoryCacheEntry : contains
-    CacheService --> CacheRequest : processes
-    CacheService --> CacheSaveRequest : processes
-    CacheRequest --> CacheResponse : returns via channel
-    CacheService --> UpdateFunc : uses for updates
-
-    %% Functions
-    NewMemoryCache~T~ ..> MemoryCache : creates
-    NewCacheService~T~ ..> CacheService : creates
 ```
 
 ## Key Components
@@ -96,12 +50,11 @@ classDiagram
 The core abstraction that defines the operations a cache provider must implement:
 
 ```go
-
 type Driver[T any] interface {
     Set(ctx context.Context, key string, value T, expiration time.Duration) error
     Get(ctx context.Context, key string) (T, bool, error)
     Delete(ctx context.Context, key string) error
-    GetExpiration(ctx context.Context, key string) (time.Time, bool, error)
+    TTL(ctx context.Context, key string) (time.Time, bool, error)
     Keys(ctx context.Context) ([]string, error)
 }
 ```
@@ -124,31 +77,38 @@ Provides a high-level interface for cache operations through channels:
 
 ```go
 import (
-    "context"
-    "time"
-    "github.com/pixie-sh/pcache"
+"context"
+"time"
+"github.com/pixie-sh/pcache"
 )
 
-// Define an update function to refresh expired/missing entries
-updateFunc := func(key string) (string, time.Duration, error) {
-    // Fetch data from source when cache misses
-    return "fresh value", 5*time.Minute, nil
+// Create an update function for refreshing expired cache entries
+updateFunc := func (key string) (UserData, time.Duration, error) {
+    // In a real application, you'd fetch fresh data here
+    fmt.Printf("Updating expired key: %s\n", key)
+    return UserData{
+    ID:      123,
+    Name:    "Updated User",
+    Profile: "Updated Profile",
+    }, 30 * time.Minute, nil
 }
 
-// Create a memory cache provider
-memCache := pcache.NewMemoryCache[string]()
+// Create the memory cache provider
+memCache := NewMemoryCache[UserData]()
 
-// Create and start the cache service
-cacheService := pcache.NewCacheService[string](
-    memCache,
-    updateFunc,
-    1*time.Minute,  // Cleanup interval
-)
+// Create the cache service with 10 second cleanup interval
+cacheService := NewService[UserData](memCache, updateFunc, ServiceConfiguration{
+    CleanupInterval:   10 * time.Second,
+    UpdateOnCacheMiss: true,
+    UpdateOnGetError:  false,
+})
 
-ctx := context.Background()
-cacheService.StartAsync(ctx)
+
+var ctx = context.Background()
 defer cacheService.Close()
+cacheService.StartAsync(ctx)
 ```
+
 
 ### Tests
 

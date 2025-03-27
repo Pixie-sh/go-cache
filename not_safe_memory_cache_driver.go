@@ -61,8 +61,8 @@ func (mc *NotSafeMemoryCache[T]) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-// GetExpiration returns when a key will expire
-func (mc *NotSafeMemoryCache[T]) GetExpiration(_ context.Context, key string) (time.Time, bool, error) {
+// TTL returns when a key will expire
+func (mc *NotSafeMemoryCache[T]) TTL(_ context.Context, key string) (time.Time, bool, error) {
 	entry, exists := mc.data[key]
 	if !exists {
 		return time.Time{}, false, nil

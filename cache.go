@@ -19,8 +19,8 @@ type Driver[T any] interface {
 	// Delete removes a value from the cache
 	Delete(ctx context.Context, key string) error
 
-	// GetExpiration returns when a key will expire
-	GetExpiration(ctx context.Context, key string) (time.Time, bool, error)
+	// TTL returns when a key will expire
+	TTL(ctx context.Context, key string) (time.Time, bool, error)
 
 	// Keys returns all keys in the cache (used for cleanup)
 	Keys(ctx context.Context) ([]string, error)
@@ -185,7 +185,7 @@ func (cs *Service[T]) checkExpiredEntries(ctx context.Context) {
 
 	now := time.Now()
 	for _, key := range keys {
-		expiration, exists, err := cs.provider.GetExpiration(ctx, key)
+		expiration, exists, err := cs.provider.TTL(ctx, key)
 		if err != nil || !exists {
 			continue
 		}
